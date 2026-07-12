@@ -1,0 +1,39 @@
+GridNextGen — Intelligent Utilities Management Platform
+
+This product includes context-compression algorithms adapted from the
+RAG Compression Demo project, reproduced as required by Apache 2.0 §4(d):
+
+  RAG Compression Demo
+  Copyright 2026 Vishal Mysore (https://github.com/vishalmysore)
+  https://github.com/vishalmysore/ragCompressionDemo
+  Licensed under the Apache License, Version 2.0
+
+That project's compression engine is itself a TypeScript port of algorithms
+from the Headroom project:
+
+  Headroom — Context Compression Library
+  Copyright 2025 Headroom Contributors
+  https://github.com/chopratejas/headroom
+  Licensed under the Apache License, Version 2.0
+
+The following source files in this project are derivative works of the
+above, adapted for this platform's Document Intelligence page and Grid
+Copilot context compression:
+
+  src/lib/headroom-engine/adaptive-sizer.ts
+  src/lib/headroom-engine/smart-crusher.ts
+  src/lib/headroom-engine/log-compressor.ts
+  src/lib/headroom-engine/text-compressor.ts
+  src/lib/headroom-engine/code-compressor.ts
+  src/lib/headroom-engine/tfidf-compressor.ts
+  src/lib/headroom-engine/textrank-compressor.ts
+  src/lib/headroom-engine/extra-compressors.ts
+  src/lib/headroom-engine/index.ts
+  src/lib/compression-sim.ts
+  src/lib/tokenizer.ts
+  src/lib/chunk-store.ts
+  src/lib/pdf-bridge.ts
+  src/workers/pdf.worker.ts
+
+You may obtain a copy of the Apache License, Version 2.0 at:
+  http://www.apache.org/licenses/LICENSE-2.0

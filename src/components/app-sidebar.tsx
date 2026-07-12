@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Network, Gauge, AlertTriangle, TrendingUp, ScrollText, Zap,
-  Bot, ShieldAlert, CheckCircle, Boxes, Activity,
+  Bot, ShieldAlert, CheckCircle, Boxes, Activity, FileText,
   Cpu, Wifi, Binary, LogOut,
 } from "lucide-react";
 import {
@@ -24,6 +24,7 @@ const coreItems = [
 
 const intelligenceItems = [
   { title: "AI Grid Copilot", href: "/copilot", icon: Bot },
+  { title: "Document Intelligence", href: "/documents", icon: FileText },
   { title: "Energy-Theft Detection", href: "/theft", icon: ShieldAlert },
   { title: "Predictive Failure", href: "/predictive", icon: Boxes },
   { title: "Digital Twin", href: "/twin", icon: Activity },

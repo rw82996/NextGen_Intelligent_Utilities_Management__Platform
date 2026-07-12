@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import type { CopilotMessage } from "@/types";
 import { copilotSuggestions, getCopilotResponse } from "@/lib/theft";
 import { buildGridContext, GRID_COPILOT_SYSTEM_PROMPT } from "@/lib/client-data";
+import { compressText } from "@/lib/headroom-engine/text-compressor";
+import { countTokens } from "@/lib/tokenizer";
 import {
   loadModel,
   generate,
@@ -29,6 +31,7 @@ export default function CopilotPage() {
   const [loading, setLoading] = useState(false);
   const [modelStatus, setModelStatus] = useState<ModelStatus>("idle");
   const [progress, setProgress] = useState<{ file: string; pct: number } | null>(null);
+  const [contextStat, setContextStat] = useState<{ before: number; after: number } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const webgpu = useRef(false);
   const router = useRouter();
@@ -67,10 +70,15 @@ export default function CopilotPage() {
     if (modelStatus === "ready") {
       const id = crypto.randomUUID();
       setMessages((prev) => [...prev, { id, role: "assistant", content: "", timestamp: new Date().toISOString() }]);
+      // Compress the grid-state context to what's relevant to this question before
+      // it hits the tiny local model — keeps the prompt small on every turn.
+      const rawCtx = buildGridContext();
+      const compressedCtx = compressText(rawCtx, 0.5, text).compressed;
+      setContextStat({ before: countTokens(rawCtx), after: countTokens(compressedCtx) });
       try {
         await generate(
           [
-            { role: "system", content: `${GRID_COPILOT_SYSTEM_PROMPT}\n\nCONTEXT:\n${buildGridContext()}` },
+            { role: "system", content: `${GRID_COPILOT_SYSTEM_PROMPT}\n\nCONTEXT:\n${compressedCtx}` },
             { role: "user", content: text },
           ],
           (full) => setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content: full } : m))),
@@ -151,6 +159,12 @@ export default function CopilotPage() {
           <p className="mt-2 text-[11px] text-white/80">
             Local model failed to load — using the built-in keyword assistant.{" "}
             <button onClick={handleLoadModel} className="underline">Retry</button>
+          </p>
+        )}
+        {modelStatus === "ready" && contextStat && contextStat.after < contextStat.before && (
+          <p className="mt-2 text-[11px] text-white/70">
+            Context compressed {contextStat.before.toLocaleString()} → {contextStat.after.toLocaleString()} tok
+            ({Math.round((1 - contextStat.after / contextStat.before) * 100)}% smaller) before reaching the model.
           </p>
         )}
       </div>
