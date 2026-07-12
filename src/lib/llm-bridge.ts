@@ -8,6 +8,25 @@ export type ModelStatus = "idle" | "loading" | "ready" | "no-webgpu" | "error";
 // Small, browser-friendly instruct model. ~600MB download, WebGPU only.
 export const DEFAULT_MODEL_ID = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC";
 
+export interface ModelOption {
+  id: string;
+  label: string;
+  vramMB: number;
+  recommended?: boolean;
+}
+
+// Curated subset of WebLLM's prebuilt model list, ordered by size.
+// vramMB is the model's vram_required_MB as reported by @mlc-ai/web-llm.
+export const AVAILABLE_MODELS: ModelOption[] = [
+  { id: "SmolLM2-360M-Instruct-q4f32_1-MLC", label: "SmolLM2 360M — broadest GPU compatibility (no shader-f16 required)", vramMB: 580 },
+  { id: DEFAULT_MODEL_ID,                    label: "Qwen2.5 0.5B — recommended", vramMB: 945, recommended: true },
+  { id: "Llama-3.2-1B-Instruct-q4f16_1-MLC", label: "Llama 3.2 1B", vramMB: 879 },
+  { id: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC", label: "Qwen2.5 1.5B", vramMB: 1630 },
+  { id: "gemma-2-2b-it-q4f16_1-MLC",         label: "Gemma 2 2B", vramMB: 1895 },
+  { id: "Llama-3.2-3B-Instruct-q4f16_1-MLC", label: "Llama 3.2 3B — needs a dedicated GPU", vramMB: 2264 },
+  { id: "Phi-3.5-mini-instruct-q4f16_1-MLC", label: "Phi-3.5 Mini — needs a dedicated GPU", vramMB: 3672 },
+];
+
 export interface LoadProgress {
   file: string;
   progress: number;

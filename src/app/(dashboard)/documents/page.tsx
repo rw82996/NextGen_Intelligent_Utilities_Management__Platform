@@ -14,6 +14,7 @@ import {
   generate,
   isWebGPUAvailable,
   DEFAULT_MODEL_ID,
+  AVAILABLE_MODELS,
   type ModelStatus,
 } from "@/lib/llm-bridge";
 
@@ -34,6 +35,8 @@ export default function DocumentsPage() {
 
   const [modelStatus, setModelStatus] = useState<ModelStatus>("idle");
   const [modelProgress, setModelProgress] = useState<{ file: string; pct: number } | null>(null);
+  const [selectedModelId, setSelectedModelId] = useState(DEFAULT_MODEL_ID);
+  const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const webgpu = useRef(false);
 
   const [question, setQuestion] = useState("");
@@ -55,8 +58,9 @@ export default function DocumentsPage() {
   async function handleLoadModel() {
     setModelStatus("loading");
     try {
-      await loadModel(DEFAULT_MODEL_ID, (p) => setModelProgress({ file: p.file, pct: p.progress }));
+      await loadModel(selectedModelId, (p) => setModelProgress({ file: p.file, pct: p.progress }));
       setModelStatus("ready");
+      setLoadedModelId(selectedModelId);
       setModelProgress(null);
     } catch (err) {
       console.error("[Document Intelligence] local model failed to load:", err);
@@ -184,15 +188,29 @@ export default function DocumentsPage() {
 
             <div className="pt-2 border-t space-y-2">
               <p className="text-sm font-semibold flex items-center gap-1.5"><Cpu className="h-4 w-4" /> 2. Local model</p>
-              {modelStatus === "ready" ? (
-                <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-2">Model ready</p>
-              ) : modelStatus === "no-webgpu" ? (
+              {modelStatus === "no-webgpu" ? (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">WebGPU unavailable in this browser</p>
               ) : (
-                <Button size="sm" variant="outline" onClick={handleLoadModel} disabled={modelStatus === "loading"} className="w-full">
-                  {modelStatus === "loading" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
-                  {modelStatus === "loading" ? (modelProgress ? `Loading ${modelProgress.pct}%` : "Loading…") : modelStatus === "error" ? "Retry load" : "Load model"}
-                </Button>
+                <>
+                  <select
+                    value={selectedModelId}
+                    onChange={(e) => setSelectedModelId(e.target.value)}
+                    disabled={modelStatus === "loading"}
+                    className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs disabled:opacity-50"
+                  >
+                    {AVAILABLE_MODELS.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
+                  {modelStatus === "ready" && loadedModelId === selectedModelId ? (
+                    <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-2">Model ready</p>
+                  ) : (
+                    <Button size="sm" variant="outline" onClick={handleLoadModel} disabled={modelStatus === "loading"} className="w-full">
+                      {modelStatus === "loading" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                      {modelStatus === "loading" ? (modelProgress ? `Loading ${modelProgress.pct}%` : "Loading…") : modelStatus === "error" ? "Retry load" : modelStatus === "ready" ? "Switch model" : "Load model"}
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           </CardContent>

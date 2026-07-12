@@ -16,6 +16,7 @@ import {
   generate,
   isWebGPUAvailable,
   DEFAULT_MODEL_ID,
+  AVAILABLE_MODELS,
   type ModelStatus,
 } from "@/lib/llm-bridge";
 
@@ -32,6 +33,8 @@ export default function CopilotPage() {
   const [modelStatus, setModelStatus] = useState<ModelStatus>("idle");
   const [progress, setProgress] = useState<{ file: string; pct: number } | null>(null);
   const [contextStat, setContextStat] = useState<{ before: number; after: number } | null>(null);
+  const [selectedModelId, setSelectedModelId] = useState(DEFAULT_MODEL_ID);
+  const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const webgpu = useRef(false);
   const router = useRouter();
@@ -48,8 +51,9 @@ export default function CopilotPage() {
   async function handleLoadModel() {
     setModelStatus("loading");
     try {
-      await loadModel(DEFAULT_MODEL_ID, (p) => setProgress({ file: p.file, pct: p.progress }));
+      await loadModel(selectedModelId, (p) => setProgress({ file: p.file, pct: p.progress }));
       setModelStatus("ready");
+      setLoadedModelId(selectedModelId);
       setProgress(null);
     } catch (err) {
       console.error("[Grid Copilot] local model failed to load:", err);
@@ -119,10 +123,23 @@ export default function CopilotPage() {
             <p className="text-xs text-white/70">AI operator assistant for grid ops, outages &amp; forecasting</p>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            {modelStatus === "ready" ? (
+            {modelStatus !== "no-webgpu" && (
+              <select
+                value={selectedModelId}
+                onChange={(e) => setSelectedModelId(e.target.value)}
+                disabled={modelStatus === "loading"}
+                title="Choose which local model to run"
+                className="rounded-full border-none bg-white/20 px-2.5 py-1 text-xs text-white outline-none disabled:opacity-50 [&>option]:text-slate-900"
+              >
+                {AVAILABLE_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+            )}
+            {modelStatus === "ready" && loadedModelId === selectedModelId ? (
               <div className="flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1">
                 <Cpu className="h-3.5 w-3.5 text-white" />
-                <span className="text-xs text-white/90">Local model active</span>
+                <span className="text-xs text-white/90">Model active</span>
               </div>
             ) : modelStatus === "loading" ? (
               <div className="flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1">
@@ -143,7 +160,7 @@ export default function CopilotPage() {
                 title="Download and run a local LLM in your browser (WebGPU)"
               >
                 <Download className="h-3.5 w-3.5" />
-                Run local model
+                {modelStatus === "ready" ? "Switch model" : "Run local model"}
               </button>
             )}
           </div>
