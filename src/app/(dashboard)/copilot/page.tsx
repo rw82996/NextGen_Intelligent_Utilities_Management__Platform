@@ -51,7 +51,8 @@ export default function CopilotPage() {
       await loadModel(DEFAULT_MODEL_ID, (p) => setProgress({ file: p.file, pct: p.progress }));
       setModelStatus("ready");
       setProgress(null);
-    } catch {
+    } catch (err) {
+      console.error("[Grid Copilot] local model failed to load:", err);
       setModelStatus(webgpu.current ? "error" : "no-webgpu");
       setProgress(null);
     }

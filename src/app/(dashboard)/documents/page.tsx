@@ -58,7 +58,8 @@ export default function DocumentsPage() {
       await loadModel(DEFAULT_MODEL_ID, (p) => setModelProgress({ file: p.file, pct: p.progress }));
       setModelStatus("ready");
       setModelProgress(null);
-    } catch {
+    } catch (err) {
+      console.error("[Document Intelligence] local model failed to load:", err);
       setModelStatus(webgpu.current ? "error" : "no-webgpu");
       setModelProgress(null);
     }
