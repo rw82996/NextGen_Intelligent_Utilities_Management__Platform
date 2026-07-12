@@ -1,19 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/status-badge";
 import { formatKWh } from "@/lib/format";
+import { getMeters } from "@/lib/client-data";
 import { Search, Gauge } from "lucide-react";
 import type { SmartMeter } from "@/types";
 
 export default function MetersPage() {
-  const [meters, setMeters] = useState<SmartMeter[]>([]);
+  const [meters] = useState<SmartMeter[]>(() => getMeters());
   const [search, setSearch] = useState("");
 
-  useEffect(() => { fetch("/api/meters").then(r => r.json()).then(setMeters); }, []);
+
 
   const filtered = meters.filter(m =>
     m.meterId.toLowerCase().includes(search.toLowerCase()) ||

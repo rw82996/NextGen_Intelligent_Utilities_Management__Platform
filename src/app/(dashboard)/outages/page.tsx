@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { StatusBadge, RiskBadge } from "@/components/status-badge";
 import { formatMW, formatNumber, formatDateTime } from "@/lib/format";
+import { getOutages } from "@/lib/client-data";
 import { AlertTriangle, Users, Clock, Wrench } from "lucide-react";
 import type { Outage } from "@/types";
 
@@ -13,9 +14,7 @@ const causeLabels: Record<string, string> = {
 };
 
 export default function OutagesPage() {
-  const [outages, setOutages] = useState<Outage[]>([]);
-
-  useEffect(() => { fetch("/api/outages").then(r => r.json()).then(d => setOutages(d.outages)); }, []);
+  const [outages] = useState<Outage[]>(() => getOutages().outages);
 
   const active = outages.filter(o => o.status !== "RESTORED");
   const totalCustomers = active.reduce((s, o) => s + o.customersAffected, 0);

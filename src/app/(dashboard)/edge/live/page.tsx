@@ -2,7 +2,18 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Radio, RefreshCw, Wifi, WifiOff, Zap, AlertCircle, Activity } from "lucide-react";
-import type { TelemetryChannel } from "@/lib/edge";
+import { telemetrySeed, type TelemetryChannel } from "@/lib/edge";
+
+function jitter(ch: TelemetryChannel): TelemetryChannel {
+  const swing = ch.channelId === "FREQ" ? 0.05 : ch.nominal * 0.06;
+  const value = Number((ch.value + (Math.random() - 0.5) * swing).toFixed(ch.channelId === "FREQ" ? 3 : 1));
+  const dev = Math.abs(value - ch.nominal) / (ch.nominal || 1);
+  const status: TelemetryChannel["status"] =
+    ch.channelId === "TX-N-14" ? (value > 82 ? "ALARM" : "WARNING")
+    : dev > 0.08 ? "WARNING"
+    : "NORMAL";
+  return { ...ch, value, status, updatedAt: new Date().toISOString() };
+}
 
 const statusColors: Record<string, string> = {
   NORMAL: "bg-emerald-100 text-emerald-700",
@@ -11,17 +22,17 @@ const statusColors: Record<string, string> = {
 };
 
 export default function LiveTelemetryPage() {
-  const [tradChannels, setTradChannels] = useState<TelemetryChannel[]>([]);
+  const [tradChannels, setTradChannels] = useState<TelemetryChannel[]>(() => telemetrySeed.map(c => ({ ...c })));
   const [tradLoading, setTradLoading] = useState(false);
   const [tradLastRefresh, setTradLastRefresh] = useState<string | null>(null);
   const [tradRefreshCount, setTradRefreshCount] = useState(0);
 
-  const [sseChannels, setSseChannels] = useState<TelemetryChannel[]>([]);
-  const [sseConnected, setSseConnected] = useState(false);
+  const [sseChannels, setSseChannels] = useState<TelemetryChannel[]>(() => telemetrySeed.map(c => ({ ...c })));
+  const [sseConnected, setSseConnected] = useState(true);
   const [sseEventCount, setSseEventCount] = useState(0);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null);
-  const esRef = useRef<EventSource | null>(null);
+  const liveRef = useRef<TelemetryChannel[]>(telemetrySeed.map(c => ({ ...c })));
 
   const fetchTraditional = useCallback(async () => {
     setTradLoading(true);
@@ -33,25 +44,23 @@ export default function LiveTelemetryPage() {
   }, [sseChannels]);
 
   useEffect(() => {
-    const es = new EventSource("/api/telemetry/stream");
-    esRef.current = es;
-    es.onopen = () => setSseConnected(true);
-    es.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.type === "init") {
-        setSseChannels(data.channels);
-        setTradChannels(data.channels.map((c: TelemetryChannel) => ({ ...c })));
-        setTradLastRefresh(new Date().toLocaleTimeString());
-      } else if (data.type === "update") {
-        setSseChannels(prev => prev.map(c => c.channelId === data.channel.channelId ? data.channel : c));
-        setSseEventCount(c => c + 1);
-        setLastUpdate(new Date().toLocaleTimeString());
-        setFlashId(data.channel.channelId);
-        setTimeout(() => setFlashId(null), 800);
-      }
-    };
-    es.onerror = () => setSseConnected(false);
-    return () => { es.close(); esRef.current = null; };
+    // In-browser telemetry simulator (replaces the server SSE stream so the
+    // app runs fully client-side on static hosting / GitHub Pages).
+    const interval = setInterval(() => {
+      const chans = liveRef.current;
+      if (chans.length === 0) return;
+      const idx = Math.floor(Math.random() * chans.length);
+      const updated = jitter(chans[idx]);
+      const next = chans.map((c, i) => (i === idx ? updated : c));
+      liveRef.current = next;
+      setSseChannels(next);
+      setSseEventCount(c => c + 1);
+      setLastUpdate(new Date().toLocaleTimeString());
+      setFlashId(updated.channelId);
+      setTimeout(() => setFlashId(null), 800);
+    }, 1500);
+
+    return () => { clearInterval(interval); setSseConnected(false); };
   }, []);
 
   const staleCount = sseChannels.filter(c => {

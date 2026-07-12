@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, RiskBadge } from "@/components/status-badge";
 import { formatMW, formatNumber } from "@/lib/format";
+import { getGrid, getOutages } from "@/lib/client-data";
 import {
   Gauge, Zap, TrendingUp, AlertTriangle, Activity, ShieldAlert, ArrowUpRight, Bot, Leaf,
 } from "lucide-react";
@@ -36,14 +37,9 @@ function StatCard({ title, value, subtitle, icon: Icon, trend, gradient }: {
 }
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<GridStats | null>(null);
-  const [outages, setOutages] = useState<Outage[]>([]);
-  const [forecasts, setForecasts] = useState<DemandForecast[]>([]);
-
-  useEffect(() => {
-    fetch("/api/grid").then(r => r.json()).then(d => { setStats(d.stats); setForecasts(d.forecasts); });
-    fetch("/api/outages").then(r => r.json()).then(d => setOutages(d.outages));
-  }, []);
+  const [stats] = useState<GridStats>(() => getGrid().stats);
+  const [forecasts] = useState<DemandForecast[]>(() => getGrid().forecasts);
+  const [outages] = useState<Outage[]>(() => getOutages().outages);
 
   const activeOutages = outages.filter(o => o.status !== "RESTORED").slice(0, 5);
 

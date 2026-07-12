@@ -1,12 +1,21 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Bot, Send, Sparkles, ArrowRight, User } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Bot, Send, Sparkles, ArrowRight, User, Cpu, Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import type { CopilotMessage } from "@/types";
-import { copilotSuggestions } from "@/lib/theft";
+import { copilotSuggestions, getCopilotResponse } from "@/lib/theft";
+import { buildGridContext, GRID_COPILOT_SYSTEM_PROMPT } from "@/lib/client-data";
+import {
+  loadModel,
+  generate,
+  isWebGPUAvailable,
+  DEFAULT_MODEL_ID,
+  type ModelStatus,
+} from "@/lib/llm-bridge";
 
 export default function CopilotPage() {
   const [messages, setMessages] = useState<CopilotMessage[]>([
@@ -18,11 +27,32 @@ export default function CopilotPage() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [modelStatus, setModelStatus] = useState<ModelStatus>("idle");
+  const [progress, setProgress] = useState<{ file: string; pct: number } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const webgpu = useRef(false);
+  const router = useRouter();
+
+  useEffect(() => {
+    webgpu.current = isWebGPUAvailable();
+    if (!webgpu.current) setModelStatus("no-webgpu");
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  async function handleLoadModel() {
+    setModelStatus("loading");
+    try {
+      await loadModel(DEFAULT_MODEL_ID, (p) => setProgress({ file: p.file, pct: p.progress }));
+      setModelStatus("ready");
+      setProgress(null);
+    } catch {
+      setModelStatus(webgpu.current ? "error" : "no-webgpu");
+      setProgress(null);
+    }
+  }
 
   async function handleSend(msg?: string) {
     const text = msg ?? input;
@@ -32,15 +62,31 @@ export default function CopilotPage() {
     setInput("");
     setLoading(true);
 
-    try {
-      const res = await fetch("/api/copilot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text }) });
-      const data = (await res.json()) as CopilotMessage;
-      setMessages((prev) => [...prev, data]);
-    } catch {
-      setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content: "Sorry, something went wrong. Please try again.", timestamp: new Date().toISOString() }]);
-    } finally {
-      setLoading(false);
+    // Prefer the local in-browser LLM when it's loaded; otherwise fall back to
+    // the deterministic keyword assistant so the Copilot always responds.
+    if (modelStatus === "ready") {
+      const id = crypto.randomUUID();
+      setMessages((prev) => [...prev, { id, role: "assistant", content: "", timestamp: new Date().toISOString() }]);
+      try {
+        await generate(
+          [
+            { role: "system", content: `${GRID_COPILOT_SYSTEM_PROMPT}\n\nCONTEXT:\n${buildGridContext()}` },
+            { role: "user", content: text },
+          ],
+          (full) => setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, content: full } : m))),
+        );
+      } catch {
+        const fb = getCopilotResponse(text);
+        setMessages((prev) => prev.map((m) => (m.id === id ? fb : m)));
+      } finally {
+        setLoading(false);
+      }
+      return;
     }
+
+    // Keyword fallback (no WebGPU / model not loaded).
+    setMessages((prev) => [...prev, getCopilotResponse(text)]);
+    setLoading(false);
   }
 
   function renderContent(content: string) {
@@ -63,11 +109,50 @@ export default function CopilotPage() {
             <h1 className="text-lg font-bold text-white tracking-tight">Grid Copilot</h1>
             <p className="text-xs text-white/70">AI operator assistant for grid ops, outages &amp; forecasting</p>
           </div>
-          <div className="ml-auto flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1">
-            <span className="h-2 w-2 rounded-full bg-emerald-300 animate-pulse" />
-            <span className="text-xs text-white/80">Online</span>
+          <div className="ml-auto flex items-center gap-2">
+            {modelStatus === "ready" ? (
+              <div className="flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1">
+                <Cpu className="h-3.5 w-3.5 text-white" />
+                <span className="text-xs text-white/90">Local model active</span>
+              </div>
+            ) : modelStatus === "loading" ? (
+              <div className="flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1">
+                <Loader2 className="h-3.5 w-3.5 text-white animate-spin" />
+                <span className="text-xs text-white/90">
+                  {progress ? `Loading ${progress.pct}%` : "Loading model…"}
+                </span>
+              </div>
+            ) : modelStatus === "no-webgpu" ? (
+              <div className="flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1" title="WebGPU unavailable — using built-in keyword assistant">
+                <span className="h-2 w-2 rounded-full bg-emerald-300 animate-pulse" />
+                <span className="text-xs text-white/80">Keyword mode</span>
+              </div>
+            ) : (
+              <button
+                onClick={handleLoadModel}
+                className="flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs text-white hover:bg-white/30 transition-colors"
+                title="Download and run a local LLM in your browser (WebGPU)"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Run local model
+              </button>
+            )}
           </div>
         </div>
+        {modelStatus === "loading" && progress && (
+          <div className="mt-3 space-y-1">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/20">
+              <div className="h-full rounded-full bg-white transition-all" style={{ width: `${progress.pct}%` }} />
+            </div>
+            <p className="truncate text-[11px] text-white/70">{progress.file}</p>
+          </div>
+        )}
+        {modelStatus === "error" && (
+          <p className="mt-2 text-[11px] text-white/80">
+            Local model failed to load — using the built-in keyword assistant.{" "}
+            <button onClick={handleLoadModel} className="underline">Retry</button>
+          </p>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
@@ -96,7 +181,7 @@ export default function CopilotPage() {
                     {msg.suggestedActions && msg.suggestedActions.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {msg.suggestedActions.map((action, i) => (
-                          <Button key={i} size="sm" variant={action.variant === "outline" ? "outline" : "default"} className={action.variant !== "outline" ? "bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-700 hover:to-cyan-700 text-xs" : "text-xs"} onClick={() => window.location.href = action.action}>
+                          <Button key={i} size="sm" variant={action.variant === "outline" ? "outline" : "default"} className={action.variant !== "outline" ? "bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-700 hover:to-cyan-700 text-xs" : "text-xs"} onClick={() => router.push(action.action)}>
                             {action.label} <ArrowRight className="h-3 w-3 ml-1" />
                           </Button>
                         ))}

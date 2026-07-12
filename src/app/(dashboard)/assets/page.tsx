@@ -1,21 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge, RiskBadge } from "@/components/status-badge";
 import { formatMW } from "@/lib/format";
+import { getAssets } from "@/lib/client-data";
 import { Search, Network } from "lucide-react";
 import type { GridAsset } from "@/types";
 
 export default function AssetsPage() {
   const router = useRouter();
-  const [assets, setAssets] = useState<GridAsset[]>([]);
+  const [assets] = useState<GridAsset[]>(() => getAssets());
   const [search, setSearch] = useState("");
-
-  useEffect(() => { fetch("/api/assets").then(r => r.json()).then(setAssets); }, []);
 
   const filtered = assets.filter(a =>
     a.name.toLowerCase().includes(search.toLowerCase()) ||

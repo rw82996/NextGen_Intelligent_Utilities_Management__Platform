@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/format";
+import { getAuditEvents } from "@/lib/client-data";
 import { Search } from "lucide-react";
 import type { AuditEvent } from "@/types";
 
@@ -21,12 +22,8 @@ const actionStyles: Record<string, string> = {
 };
 
 export default function AuditPage() {
-  const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [events] = useState<AuditEvent[]>(() => getAuditEvents());
   const [search, setSearch] = useState("");
-
-  useEffect(() => {
-    fetch("/api/audit").then(r => r.json()).then(setEvents);
-  }, []);
 
   const filtered = events.filter(e =>
     e.description.toLowerCase().includes(search.toLowerCase()) ||

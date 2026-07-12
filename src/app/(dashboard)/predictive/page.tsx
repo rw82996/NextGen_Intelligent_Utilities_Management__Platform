@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { RiskBadge, StatusBadge } from "@/components/status-badge";
 import { formatMW } from "@/lib/format";
+import { getAssets } from "@/lib/client-data";
 import { Boxes, Wrench, Clock, TrendingDown } from "lucide-react";
 import type { GridAsset } from "@/types";
 
@@ -23,9 +24,7 @@ function failureProbability(a: GridAsset): number {
 }
 
 export default function PredictivePage() {
-  const [assets, setAssets] = useState<GridAsset[]>([]);
-
-  useEffect(() => { fetch("/api/assets").then(r => r.json()).then(setAssets); }, []);
+  const [assets] = useState<GridAsset[]>(() => getAssets());
 
   const ranked = [...assets].sort((a, b) => failureProbability(b) - failureProbability(a));
   const atRisk = ranked.filter(a => a.riskLevel === "HIGH" || a.riskLevel === "CRITICAL");

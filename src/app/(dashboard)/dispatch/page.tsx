@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, RiskBadge } from "@/components/status-badge";
 import { formatMW, formatDateTime } from "@/lib/format";
 import { CheckCircle, XCircle, Zap } from "lucide-react";
 import { toast } from "sonner";
+import { getOutages } from "@/lib/client-data";
 import type { DispatchOrder } from "@/types";
 
 const typeLabels: Record<string, string> = {
@@ -15,9 +16,7 @@ const typeLabels: Record<string, string> = {
 };
 
 export default function DispatchPage() {
-  const [orders, setOrders] = useState<DispatchOrder[]>([]);
-
-  useEffect(() => { fetch("/api/outages").then(r => r.json()).then(d => setOrders(d.dispatchOrders)); }, []);
+  const [orders, setOrders] = useState<DispatchOrder[]>(() => getOutages().dispatchOrders);
 
   function act(id: string, status: "APPROVED" | "REJECTED") {
     setOrders(prev => prev.map(o => o.orderId === id ? { ...o, status } : o));

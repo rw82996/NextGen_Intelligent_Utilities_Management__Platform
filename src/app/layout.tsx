@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -18,6 +19,11 @@ export const metadata: Metadata = {
   description: "AI-Native Energy Grid & Utilities Operations, Forecasting, and Edge Analytics Platform",
 };
 
+// Base path prefix (matches next.config.ts) so the COI service worker resolves
+// correctly under the GitHub Pages sub-path.
+const basePrefix =
+  process.env.GITHUB_ACTIONS === "true" ? "/NextGen_Intelligent_Utilities_Management__Platform" : "";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -29,6 +35,7 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        <Script src={`${basePrefix}/coi-serviceworker.js`} strategy="beforeInteractive" />
         {children}
         <Toaster />
       </body>

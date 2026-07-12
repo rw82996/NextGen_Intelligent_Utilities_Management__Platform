@@ -1,18 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, RiskBadge } from "@/components/status-badge";
 import { formatKWh } from "@/lib/format";
+import { getTheftAlerts } from "@/lib/client-data";
 import { ShieldAlert, Zap, TrendingDown } from "lucide-react";
 import type { TheftAlert } from "@/types";
 
 export default function TheftPage() {
-  const [alerts, setAlerts] = useState<TheftAlert[]>([]);
-  const [selected, setSelected] = useState<TheftAlert | null>(null);
-
-  useEffect(() => { fetch("/api/theft").then(r => r.json()).then((d: TheftAlert[]) => { setAlerts(d); setSelected(d[0] ?? null); }); }, []);
+  const [alerts] = useState<TheftAlert[]>(() => getTheftAlerts());
+  const [selected, setSelected] = useState<TheftAlert | null>(() => getTheftAlerts()[0] ?? null);
 
   const open = alerts.filter(a => a.status === "OPEN" || a.status === "INVESTIGATING");
   const totalLoss = alerts.reduce((s, a) => s + a.estimatedLossKWh, 0);

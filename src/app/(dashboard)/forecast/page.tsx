@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { getGrid } from "@/lib/client-data";
 import { TrendingUp, Sun, Thermometer } from "lucide-react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import type { DemandForecast } from "@/types";
@@ -10,10 +11,8 @@ import type { DemandForecast } from "@/types";
 type Scenario = "BASE" | "HEATWAVE" | "LOW_RENEWABLE";
 
 export default function ForecastPage() {
-  const [forecasts, setForecasts] = useState<DemandForecast[]>([]);
+  const [forecasts] = useState<DemandForecast[]>(() => getGrid().forecasts);
   const [scenario, setScenario] = useState<Scenario>("BASE");
-
-  useEffect(() => { fetch("/api/grid").then(r => r.json()).then(d => setForecasts(d.forecasts)); }, []);
 
   const adjusted = forecasts.map(f => {
     let demand = f.projectedDemandMW;

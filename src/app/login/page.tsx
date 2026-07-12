@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { authenticate } from "@/lib/client-data";
 import { Zap } from "lucide-react";
 
 export default function LoginPage() {
@@ -15,14 +16,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState("demo1234");
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
+  const handleLogin = () => {
     setLoading(true);
-    const res = await fetch("/api/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    if (res.ok) {
+    const user = authenticate(email, password);
+    if (user) {
       toast.success("Welcome to GridNextGen");
       router.push("/");
     } else {

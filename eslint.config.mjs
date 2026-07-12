@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored third-party COOP/COEP service worker (gzuidhof/coi-serviceworker).
+    "public/coi-serviceworker.js",
   ]),
 ]);
 
