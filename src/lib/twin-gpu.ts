@@ -2,7 +2,7 @@
 // Encodes all iterations into a single command buffer, ping-ponging two
 // storage buffers between passes so the whole 60-iteration solve is one
 // GPU submission instead of 60 round-trips.
-import { MAX_DEGREE, BUSES, EDGES, reachableFromSlack, type EffectiveTopology, type PowerFlowResult } from "./twin-topology";
+import { MAX_DEGREE, BUSES, EDGES, BASE_MVA, LINE_OVERLOAD_MW, reachableFromSlack, type EffectiveTopology, type PowerFlowResult } from "./twin-topology";
 
 const JACOBI_SHADER = `
 struct Bus { power: f32, isSlack: f32, reachable: f32, _pad: f32 }
@@ -99,8 +99,8 @@ export async function solvePowerFlowGpu(topo: EffectiveTopology, iterations = 60
     const a = topo.busIndex[e.from], b = topo.busIndex[e.to];
     const stillConnected = topo.neighbors.slice(a * MAX_DEGREE, a * MAX_DEGREE + MAX_DEGREE).includes(b);
     if (!stillConnected) return { from: e.from, to: e.to, flowMW: 0, overloaded: false, connected: false };
-    const flow = e.susceptance * (theta[a] - theta[b]) * 50;
-    return { from: e.from, to: e.to, flowMW: flow, overloaded: Math.abs(flow) > 900, connected: true };
+    const flow = e.susceptance * (theta[a] - theta[b]) * BASE_MVA;
+    return { from: e.from, to: e.to, flowMW: flow, overloaded: Math.abs(flow) > LINE_OVERLOAD_MW, connected: true };
   });
 
   return { theta: Array.from(theta), reachable, loadShedMW, lineFlows, iterations };

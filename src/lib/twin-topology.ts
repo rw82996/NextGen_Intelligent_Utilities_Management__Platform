@@ -6,6 +6,13 @@
 
 export const MAX_DEGREE = 4;
 
+// Per-unit base power for the DC power-flow solve (100 MVA is the standard
+// textbook default). Bus power and susceptance are both expressed per-unit
+// internally so the Jacobi iteration stays numerically well-scaled; results
+// are converted back to MW for display.
+export const BASE_MVA = 100;
+export const LINE_OVERLOAD_MW = 1600;
+
 export interface Bus {
   id: string;
   name: string;
@@ -28,8 +35,8 @@ export const BUSES: Bus[] = [
   { id: "BATTERY_SITE", name: "Grid Battery Storage", kind: "storage", basePowerMW: 0 },
   { id: "SUBSTATION_C", name: "Substation C", kind: "hub", basePowerMW: 0 },
   { id: "HARBOR_GAS", name: "Harbor Gas Peaker", kind: "generation", basePowerMW: 400 },
-  { id: "SUBURBAN", name: "Suburban Load Center", kind: "load", basePowerMW: -1100 },
-  { id: "CEDAR_ZONE", name: "Cedar Load Zone", kind: "load", basePowerMW: -1450 },
+  { id: "SUBURBAN", name: "Suburban Load Center", kind: "load", basePowerMW: -900 },
+  { id: "CEDAR_ZONE", name: "Cedar Load Zone", kind: "load", basePowerMW: -1000 },
 ];
 
 export const EDGES: Edge[] = [
@@ -104,7 +111,7 @@ export function buildTopology(activeContingencyIds: string[], recoveryFrac: numb
     if (b.id === "BATTERY_SITE" && (active.size > 0) && !droppedGenBuses.has("BATTERY_SITE")) {
       p += BATTERY_MAX_MW * Math.min(1, recoveryFrac + 0.3); // batteries respond fast, near-immediate partial support
     }
-    power[i] = p;
+    power[i] = p / BASE_MVA; // convert MW -> per-unit for the solve
   });
 
   const neighbors = new Int32Array(n * MAX_DEGREE).fill(-1);
@@ -193,8 +200,8 @@ export function solvePowerFlowCpu(topo: EffectiveTopology, iterations = 60): Pow
     const a = topo.busIndex[e.from], b = topo.busIndex[e.to];
     const stillConnected = topo.neighbors.slice(a * MAX_DEGREE, a * MAX_DEGREE + MAX_DEGREE).includes(b);
     if (!stillConnected) return { from: e.from, to: e.to, flowMW: 0, overloaded: false, connected: false };
-    const flow = e.susceptance * (theta[a] - theta[b]) * 50; // scale to MW-ish units for display
-    return { from: e.from, to: e.to, flowMW: flow, overloaded: Math.abs(flow) > 900, connected: true };
+    const flow = e.susceptance * (theta[a] - theta[b]) * BASE_MVA; // per-unit -> MW
+    return { from: e.from, to: e.to, flowMW: flow, overloaded: Math.abs(flow) > LINE_OVERLOAD_MW, connected: true };
   });
 
   return { theta: Array.from(theta), reachable, loadShedMW, lineFlows, iterations };

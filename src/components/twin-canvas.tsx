@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { BUSES, EDGES } from "@/lib/twin-topology";
+import { BUSES, EDGES, LINE_OVERLOAD_MW } from "@/lib/twin-topology";
 import type { TwinSimFrame } from "@/workers/twin.worker";
 
 // Fixed layout positions for the single-line diagram (canvas coordinate space).
@@ -56,7 +56,7 @@ export function TwinCanvas({ frame }: { frame: TwinSimFrame | null }) {
           ctx!.lineDashOffset = 0;
           ctx!.lineWidth = 2;
         } else {
-          const mag = flow ? Math.min(1, Math.abs(flow.flowMW) / 900) : 0.2;
+          const mag = flow ? Math.min(1, Math.abs(flow.flowMW) / LINE_OVERLOAD_MW) : 0.2;
           ctx!.strokeStyle = flow?.overloaded ? "#f59e0b" : "#10b981";
           ctx!.lineWidth = 1.5 + mag * 4;
           ctx!.setLineDash([10, 8]);
