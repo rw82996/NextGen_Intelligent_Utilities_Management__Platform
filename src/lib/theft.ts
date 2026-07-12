@@ -1,4 +1,15 @@
 import type { TheftAlert, CopilotMessage } from "@/types";
+import type { MeterReadingFeature } from "@/lib/edge";
+
+// Feature vectors for the same WGSL anomaly-scoring shader used by GPU Anomaly
+// Scoring, keyed to each theft alert's meterId — lets "Rescan via GPU" compute
+// a live risk score instead of only showing the static riskScore below.
+export const theftMeterFeatures: Record<string, MeterReadingFeature> = {
+  "MTR-100000": { meterId: "MTR-100000", customer: "Ironworks Plant", lastReadingKWh: 120, consumptionVsAvg: 0.22, meterAgeHours: 40000, reverseFlowEvents: 6, tamperRiskScore: 0.9, nightUsageRatio: 0.85, feederImbalance: 0.88 },
+  "MTR-101011": { meterId: "MTR-101011", customer: "Harbor Logistics", lastReadingKWh: 65, consumptionVsAvg: 0.25, meterAgeHours: 20000, reverseFlowEvents: 1, tamperRiskScore: 0.3, nightUsageRatio: 0.35, feederImbalance: 0.5 },
+  "MTR-102022": { meterId: "MTR-102022", customer: "Cedar Apartments", lastReadingKWh: 145, consumptionVsAvg: 0.65, meterAgeHours: 12000, reverseFlowEvents: 0, tamperRiskScore: 0.4, nightUsageRatio: 0.3, feederImbalance: 0.25 },
+  "MTR-103033": { meterId: "MTR-103033", customer: "Sunrise Bakery", lastReadingKWh: 55, consumptionVsAvg: 0.85, meterAgeHours: 6000, reverseFlowEvents: 0, tamperRiskScore: 0.05, nightUsageRatio: 0.15, feederImbalance: 0.08 },
+};
 
 export const theftAlerts: TheftAlert[] = [
   {

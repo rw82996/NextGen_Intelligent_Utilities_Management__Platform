@@ -1,167 +1,242 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Activity, Play, Zap, AlertTriangle, CheckCircle, Thermometer, Sun } from "lucide-react";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { Activity, Play, Zap, Cpu, Sparkles, Loader2, Download } from "lucide-react";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { TwinCanvas } from "@/components/twin-canvas";
+import { CONTINGENCIES, buildTopology, solvePowerFlowCpu, type PowerFlowResult } from "@/lib/twin-topology";
+import { solvePowerFlowGpu } from "@/lib/twin-gpu";
+import { runTwinSimulation } from "@/lib/twin-bridge";
+import type { TwinSimFrame } from "@/workers/twin.worker";
+import {
+  loadModel, generate, isWebGPUAvailable, DEFAULT_MODEL_ID, AVAILABLE_MODELS, type ModelStatus,
+} from "@/lib/llm-bridge";
 
-type ScenarioId = "SUBSTATION_FAILURE" | "HEATWAVE" | "RENEWABLE_INTERMITTENCY";
-
-interface Scenario {
-  id: ScenarioId;
-  label: string;
-  icon: React.ElementType;
-  description: string;
-  severity: "CRITICAL" | "HIGH" | "MEDIUM";
-}
-
-const scenarios: Scenario[] = [
-  { id: "SUBSTATION_FAILURE", label: "Substation Failure", icon: AlertTriangle, description: "Trip Northgate 345kV substation (742 MW) and simulate load transfer & recovery.", severity: "CRITICAL" },
-  { id: "HEATWAVE", label: "Heatwave Demand Spike", icon: Thermometer, description: "Sustained +18% demand surge stressing reserve margin and thermal limits.", severity: "HIGH" },
-  { id: "RENEWABLE_INTERMITTENCY", label: "Renewable Intermittency", icon: Sun, description: "Sudden cloud front cuts solar by 60%; battery + gas ramp to compensate.", severity: "MEDIUM" },
-];
-
-interface SimStep { t: string; demand: number; generation: number; }
-interface SimResult {
-  steps: SimStep[];
-  minReserve: number;
-  loadShedMW: number;
-  recoveryMin: number;
-  batteryDispatchMW: number;
-  outcome: string;
-  stable: boolean;
-}
-
-function simulate(id: ScenarioId): SimResult {
-  const baseDemand = 4820;
-  const baseGen = 5230;
-  const steps: SimStep[] = [];
-  let loadShed = 0, minReserve = 100, recovery = 0, battery = 0;
-
-  for (let m = 0; m <= 30; m += 2) {
-    let demand = baseDemand, generation = baseGen;
-    if (id === "SUBSTATION_FAILURE") {
-      if (m >= 2 && m < 10) generation = baseGen - 742 + (m - 2) * 60;
-      else if (m >= 10) generation = baseGen - Math.max(0, 742 - (m - 2) * 60);
-      if (m >= 2 && m < 8) { loadShed = Math.max(loadShed, 320); battery = 150; }
-    } else if (id === "HEATWAVE") {
-      demand = baseDemand * (1 + 0.18 * Math.min(1, m / 12));
-      generation = baseGen + Math.min(400, m * 20);
-      if (demand > generation) { loadShed = Math.max(loadShed, Math.round(demand - generation)); battery = 150; }
-    } else {
-      if (m >= 4 && m < 16) generation = baseGen - 190 + (m - 4) * 12;
-      battery = m >= 4 && m < 16 ? 150 : 0;
-    }
-    const reserve = Number(((generation - demand) / demand * 100).toFixed(1));
-    minReserve = Math.min(minReserve, reserve);
-    if (reserve < 5 && recovery === 0) recovery = 0;
-    steps.push({ t: `${m}m`, demand: Math.round(demand), generation: Math.round(generation) });
-  }
-
-  const lastReserve = (steps[steps.length - 1].generation - steps[steps.length - 1].demand) / steps[steps.length - 1].demand * 100;
-  recovery = id === "SUBSTATION_FAILURE" ? 18 : id === "HEATWAVE" ? 24 : 12;
-  const stable = lastReserve >= 8;
-
-  const outcome = id === "SUBSTATION_FAILURE"
-    ? "Automatic load transfer to adjacent buses restored 742 MW over 18 min. 320 MW temporary load-shed avoided cascading failure; battery bridged the gap. Grid returned to stable reserve margin."
-    : id === "HEATWAVE"
-    ? "Peaking generation + demand-response + 150 MW battery discharge covered the surge. Reserve margin dipped to a minimum but stayed positive; no firm load lost after DR activation."
-    : "60% solar loss was absorbed by 150 MW battery discharge and fast gas ramp within 12 min. Frequency held within ±0.05 Hz; no customer impact.";
-
-  return { steps, minReserve, loadShedMW: loadShed, recoveryMin: recovery, batteryDispatchMW: battery > 0 ? 150 : 0, outcome, stable };
-}
+const SIM_STEPS = 20;
 
 export default function DigitalTwinPage() {
-  const [selected, setSelected] = useState<ScenarioId>("SUBSTATION_FAILURE");
-  const [result, setResult] = useState<SimResult | null>(null);
-  const [running, setRunning] = useState(false);
+  const [selectedContingencies, setSelectedContingencies] = useState<string[]>(["trip-northgate-subb"]);
 
-  async function run() {
-    setRunning(true);
-    setResult(null);
-    await new Promise(r => setTimeout(r, 600));
-    setResult(simulate(selected));
-    setRunning(false);
+  // Task 8: one-shot WebGPU vs CPU network-impact solve
+  const [solveResult, setSolveResult] = useState<{ gpu: PowerFlowResult | null; cpu: PowerFlowResult; gpuMs: number; cpuMs: number; gpuSupported: boolean } | null>(null);
+  const [solving, setSolving] = useState(false);
+
+  // Task 11: Web Worker recovery timeline; task 10: Canvas consumes currentFrame
+  const [currentFrame, setCurrentFrame] = useState<TwinSimFrame | null>(null);
+  const [history, setHistory] = useState<{ t: string; loadShedMW: number }[]>([]);
+  const [simRunning, setSimRunning] = useState(false);
+  const [simDone, setSimDone] = useState(false);
+
+  // Task 9: LLM-generated outcome narrative
+  const webgpu = useRef(false);
+  const [selectedModelId, setSelectedModelId] = useState(DEFAULT_MODEL_ID);
+  const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
+  const [modelStatus, setModelStatus] = useState<ModelStatus>("idle");
+  const [modelProgress, setModelProgress] = useState<{ file: string; pct: number } | null>(null);
+  const [narrative, setNarrative] = useState("");
+  const [narrativeBusy, setNarrativeBusy] = useState(false);
+
+  useEffect(() => {
+    webgpu.current = isWebGPUAvailable();
+    if (!webgpu.current) setModelStatus("no-webgpu");
+  }, []);
+
+  function toggleContingency(id: string) {
+    setSelectedContingencies((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    setSolveResult(null);
+    setSimDone(false);
+    setNarrative("");
   }
 
-  const scen = scenarios.find(s => s.id === selected)!;
+  async function solveNetworkImpact() {
+    setSolving(true);
+    const topo = buildTopology(selectedContingencies, 0);
+    const t0 = performance.now();
+    const cpu = solvePowerFlowCpu(topo);
+    const cpuMs = performance.now() - t0;
+
+    const gpuSupported = typeof navigator !== "undefined" && !!navigator.gpu;
+    let gpu: PowerFlowResult | null = null;
+    let gpuMs = 0;
+    if (gpuSupported) {
+      try {
+        const t1 = performance.now();
+        gpu = await solvePowerFlowGpu(topo);
+        gpuMs = performance.now() - t1;
+      } catch (err) {
+        console.error("[Digital Twin] GPU solve failed:", err);
+      }
+    }
+    setSolveResult({ gpu, cpu, gpuMs, cpuMs, gpuSupported });
+    setSolving(false);
+  }
+
+  async function runRecoverySimulation() {
+    setSimRunning(true);
+    setSimDone(false);
+    setHistory([]);
+    setNarrative("");
+    try {
+      await runTwinSimulation(selectedContingencies, SIM_STEPS, (frame) => {
+        setCurrentFrame(frame);
+        setHistory((prev) => [...prev, { t: `${Math.round(frame.recoveryFrac * 30)}m`, loadShedMW: Math.round(frame.result.loadShedMW) }]);
+      });
+      setSimDone(true);
+    } catch (err) {
+      console.error("[Digital Twin] simulation worker failed:", err);
+    } finally {
+      setSimRunning(false);
+    }
+  }
+
+  async function handleLoadModel() {
+    setModelStatus("loading");
+    try {
+      await loadModel(selectedModelId, (p) => setModelProgress({ file: p.file, pct: p.progress }));
+      setModelStatus("ready");
+      setLoadedModelId(selectedModelId);
+      setModelProgress(null);
+    } catch (err) {
+      console.error("[Digital Twin] local model failed to load:", err);
+      setModelStatus(webgpu.current ? "error" : "no-webgpu");
+      setModelProgress(null);
+    }
+  }
+
+  async function generateOutcomeNarrative() {
+    if (modelStatus !== "ready" || !currentFrame) return;
+    setNarrativeBusy(true);
+    setNarrative("");
+    const labels = selectedContingencies.map((id) => CONTINGENCIES.find((c) => c.id === id)?.label ?? id).join("; ");
+    const initial = history[0]?.loadShedMW ?? 0;
+    const final = history[history.length - 1]?.loadShedMW ?? 0;
+    const prompt =
+      `Contingency simulated: ${labels || "none selected"}.\n` +
+      `Load shed immediately after the event: ${initial} MW. Load shed after 30-minute recovery: ${final} MW.\n` +
+      `Write a 2-3 sentence grid-operator outcome summary describing what happened and how the system recovered.`;
+    try {
+      await generate(
+        [
+          { role: "system", content: "You are a grid operations assistant summarizing a digital-twin contingency simulation. Be concise and operational." },
+          { role: "user", content: prompt },
+        ],
+        (full) => setNarrative(full),
+      );
+    } catch (err) {
+      setNarrative(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setNarrativeBusy(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Grid Digital Twin</h1>
-        <p className="text-sm text-muted-foreground mt-1">Simulate contingencies against a live model of the network before they happen.</p>
+        <p className="text-sm text-muted-foreground mt-1">Trip any combination of assets and solve the real network-wide impact via a DC power-flow model.</p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        {scenarios.map(s => (
-          <button key={s.id} onClick={() => { setSelected(s.id); setResult(null); }} className={`text-left p-4 rounded-xl border transition-all ${selected === s.id ? "border-emerald-300 bg-emerald-50/50 shadow-sm" : "hover:bg-muted/40"}`}>
-            <div className="flex items-center gap-2 mb-2">
-              <div className={`h-9 w-9 rounded-lg flex items-center justify-center ${s.severity === "CRITICAL" ? "bg-red-100" : s.severity === "HIGH" ? "bg-amber-100" : "bg-blue-100"}`}>
-                <s.icon className={`h-4 w-4 ${s.severity === "CRITICAL" ? "text-red-600" : s.severity === "HIGH" ? "text-amber-600" : "text-blue-600"}`} />
-              </div>
-              <span className="font-semibold text-sm">{s.label}</span>
-            </div>
-            <p className="text-xs text-muted-foreground">{s.description}</p>
-          </button>
-        ))}
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-1.5"><Activity className="h-4 w-4" /> Select contingencies</CardTitle>
+          <CardDescription>Any combination — not limited to 3 canned scenarios.</CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {CONTINGENCIES.map((c) => (
+            <label key={c.id} className={`flex items-center gap-2 text-xs p-2.5 rounded-lg border cursor-pointer transition-all ${selectedContingencies.includes(c.id) ? "border-red-300 bg-red-50/50" : "hover:bg-muted/40"}`}>
+              <input type="checkbox" checked={selectedContingencies.includes(c.id)} onChange={() => toggleContingency(c.id)} />
+              {c.label}
+            </label>
+          ))}
+        </CardContent>
+      </Card>
 
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">Selected scenario: <span className="font-medium text-foreground">{scen.label}</span></p>
-        <Button onClick={run} disabled={running} className="bg-gradient-to-r from-emerald-600 to-cyan-600">
-          <Play className="h-4 w-4 mr-1.5" /> {running ? "Simulating..." : "Run Simulation"}
-        </Button>
-      </div>
-
-      {result && (
-        <>
-          <div className="grid gap-4 md:grid-cols-4">
-            <Card><CardContent className="pt-5"><p className="text-xs uppercase text-muted-foreground tracking-wide">Min Reserve Margin</p><p className={`text-2xl font-bold mt-1 ${result.minReserve < 5 ? "text-red-600" : result.minReserve < 10 ? "text-amber-600" : "text-emerald-600"}`}>{result.minReserve}%</p></CardContent></Card>
-            <Card><CardContent className="pt-5"><p className="text-xs uppercase text-muted-foreground tracking-wide">Load Shed</p><p className="text-2xl font-bold mt-1">{result.loadShedMW} MW</p></CardContent></Card>
-            <Card><CardContent className="pt-5"><p className="text-xs uppercase text-muted-foreground tracking-wide">Battery Dispatch</p><p className="text-2xl font-bold mt-1">{result.batteryDispatchMW} MW</p></CardContent></Card>
-            <Card><CardContent className="pt-5"><p className="text-xs uppercase text-muted-foreground tracking-wide">Recovery Time</p><p className="text-2xl font-bold mt-1">{result.recoveryMin} min</p></CardContent></Card>
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><Activity className="h-4 w-4" /> Demand vs Generation Response</CardTitle>
-              <CardDescription>30-minute contingency simulation</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={result.steps}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                  <XAxis dataKey="t" tick={{ fontSize: 12 }} /><YAxis tick={{ fontSize: 12 }} domain={["dataMin - 200", "dataMax + 200"]} />
-                  <Tooltip /><Legend />
-                  <Line type="monotone" dataKey="demand" name="Demand (MW)" stroke="#0891b2" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="generation" name="Generation (MW)" stroke="#10b981" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
-          <Card className={result.stable ? "border-emerald-200 bg-emerald-50/30" : "border-amber-200 bg-amber-50/30"}>
-            <CardContent className="pt-5">
-              <div className="flex items-start gap-3">
-                {result.stable ? <CheckCircle className="h-5 w-5 text-emerald-600 mt-0.5 shrink-0" /> : <Zap className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />}
-                <div>
-                  <p className="font-semibold text-sm mb-1">{result.stable ? "Grid Remains Stable" : "Grid Stressed — Mitigations Required"}</p>
-                  <p className="text-sm text-muted-foreground">{result.outcome}</p>
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm flex items-center gap-1.5"><Zap className="h-4 w-4" /> Solve network impact — WebGPU vs CPU</CardTitle>
+            <CardDescription>Real DC power-flow Jacobi solver, run both ways for comparison.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Button size="sm" onClick={solveNetworkImpact} disabled={solving}><Play className="h-3.5 w-3.5" /> {solving ? "Solving…" : "Solve network impact"}</Button>
+            {solveResult && (
+              <div className="space-y-2 text-sm">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-muted/40 p-2"><p className="text-xs text-muted-foreground flex items-center gap-1"><Cpu className="h-3 w-3" /> CPU</p><p className="font-mono font-semibold">{solveResult.cpuMs.toFixed(2)} ms</p></div>
+                  <div className="rounded-lg bg-muted/40 p-2"><p className="text-xs text-muted-foreground flex items-center gap-1"><Zap className="h-3 w-3" /> WebGPU {!solveResult.gpuSupported && "(unavailable)"}</p><p className="font-mono font-semibold">{solveResult.gpu ? `${solveResult.gpuMs.toFixed(2)} ms` : "—"}</p></div>
                 </div>
+                <p><span className="font-semibold text-red-600">{Math.round(solveResult.cpu.loadShedMW)} MW</span> load shed · {solveResult.cpu.reachable.filter((r) => !r).length} bus(es) de-energized</p>
+                {solveResult.cpu.lineFlows.filter((f) => f.overloaded).length > 0 && (
+                  <p className="text-amber-600">{solveResult.cpu.lineFlows.filter((f) => f.overloaded).length} line(s) overloaded post-contingency.</p>
+                )}
               </div>
-            </CardContent>
-          </Card>
-        </>
-      )}
+            )}
+          </CardContent>
+        </Card>
 
-      {!result && !running && (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground space-y-3 rounded-xl border border-dashed">
-          <Activity className="h-8 w-8 text-slate-300" />
-          <span className="text-sm">Select a scenario and click Run Simulation</span>
-        </div>
-      )}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm flex items-center gap-1.5"><Activity className="h-4 w-4" /> Recovery simulation — Web Worker</CardTitle>
+            <CardDescription>Steps the contingency toward recovery over 30 simulated minutes, off the main thread.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Button size="sm" onClick={runRecoverySimulation} disabled={simRunning}><Play className="h-3.5 w-3.5" /> {simRunning ? "Simulating…" : "Run recovery simulation"}</Button>
+            {history.length > 0 && (
+              <div className="h-40">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={history}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="t" tick={{ fontSize: 10 }} />
+                    <YAxis tick={{ fontSize: 10 }} />
+                    <Tooltip />
+                    <Line type="monotone" dataKey="loadShedMW" stroke="#dc2626" strokeWidth={2} dot={false} name="Load shed (MW)" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">Live network topology</CardTitle>
+          <CardDescription>Animated via Canvas + requestAnimationFrame, synced to the simulation&apos;s current frame.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <TwinCanvas frame={currentFrame} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-1.5"><Sparkles className="h-4 w-4" /> AI outcome narrative</CardTitle>
+          <CardDescription>Generated by the local WebLLM model from this run&apos;s actual numbers, not scripted per-scenario text.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {modelStatus !== "ready" && modelStatus !== "no-webgpu" && (
+            <div className="flex items-center gap-2">
+              <select value={selectedModelId} onChange={(e) => setSelectedModelId(e.target.value)} disabled={modelStatus === "loading"} className="text-xs rounded-md border border-input bg-background px-1.5 py-1">
+                {AVAILABLE_MODELS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+              <Button size="sm" variant="outline" onClick={handleLoadModel} disabled={modelStatus === "loading"}>
+                {modelStatus === "loading" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                {modelStatus === "loading" ? (modelProgress ? `${modelProgress.pct}%` : "Loading…") : "Load model"}
+              </Button>
+            </div>
+          )}
+          {modelStatus === "ready" && loadedModelId === selectedModelId && (
+            <Button size="sm" variant="outline" onClick={generateOutcomeNarrative} disabled={narrativeBusy || !simDone}>
+              {narrativeBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {narrativeBusy ? "Generating…" : simDone ? "Generate outcome narrative" : "Run a simulation first"}
+            </Button>
+          )}
+          {modelStatus === "no-webgpu" && <p className="text-xs text-muted-foreground">WebGPU unavailable in this browser.</p>}
+          {narrative && <p className="text-sm text-muted-foreground whitespace-pre-wrap bg-muted/40 rounded-lg p-3">{narrative}</p>}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -10,6 +10,11 @@ const nextConfig: NextConfig = {
   basePath: isCI ? `/${repo}` : "",
   assetPrefix: isCI ? `/${repo}/` : "",
   trailingSlash: true,
+  // Exposed to client bundles so runtime fetch() calls (models, workers-of-workers,
+  // anything not routed through next/link or next/image) can prefix static asset URLs.
+  env: {
+    NEXT_PUBLIC_BASE_PATH: isCI ? `/${repo}` : "",
+  },
 };
 
 export default nextConfig;
